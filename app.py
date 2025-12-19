@@ -9,7 +9,16 @@ import os
 
 # Инициализация Flask приложения
 app = Flask(__name__)
-CORS(app, supports_credentials=True)
+# Разрешаем запросы только с вашего фронтенда
+CORS(app, resources={
+    r"/api/*": {
+        "origins": [
+            "https://frontend-topaz-seven-65.vercel.app",
+            "http://localhost:3000"  # Оставьте для локальной разработки
+        ]
+    }
+}, supports_credentials=True)
+
 
 # Конфигурация базы данных
 basedir = os.path.abspath(os.path.dirname(__file__))
