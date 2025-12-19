@@ -9,7 +9,7 @@ import os
 
 # Инициализация Flask приложения
 app = Flask(__name__)
-CORS(app, supports_credentials=True)
+CORS(app)  # ВАЖНО: убрал supports_credentials=True
 
 # Конфигурация базы данных
 basedir = os.path.abspath(os.path.dirname(__file__))
@@ -20,9 +20,11 @@ app.config['SECRET_KEY'] = 'dev-secret-key-change-in-production'
 # Конфигурация Swagger
 app.config['SWAGGER'] = {
     'title': 'My Login App API',
-    'uiversion': 3
+    'uiversion': 3,
+    'openapi': '3.0.2'
 }
-swagger = Swagger(app)
+
+swagger = Swagger(app)  # Создаем экземпляр Swagger
 
 # Инициализация SQLAlchemy
 db = SQLAlchemy(app)
@@ -102,28 +104,15 @@ def home():
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """
-    Проверка состояния сервера и подключения к базе данных.
+    Проверка состояния сервера
     ---
     tags:
       - Health
     responses:
       200:
-        description: Статус сервера и базы данных
-        schema:
-          type: object
-          properties:
-            status:
-              type: string
-            message:
-              type: string
-            database:
-              type: string
-            timestamp:
-              type: string
-              format: date-time
+        description: Статус сервера
     """
     try:
-        # В SQLAlchemy 2.x нужно оборачивать сырой SQL в text()
         db.session.execute(text('SELECT 1'))
         db_status = "connected"
     except:
@@ -138,6 +127,29 @@ def health_check():
 
 # Регистрация
 @app.route('/api/register', methods=['POST'])
+@swag_from({
+    'tags': ['Auth'],
+    'parameters': [
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'required': ['username', 'email', 'password'],
+                'properties': {
+                    'username': {'type': 'string'},
+                    'email': {'type': 'string'},
+                    'password': {'type': 'string', 'minLength': 6}
+                }
+            }
+        }
+    ],
+    'responses': {
+        201: {'description': 'Пользователь создан'},
+        400: {'description': 'Ошибка валидации'}
+    }
+})
 def register():
     try:
         data = request.json
@@ -186,6 +198,28 @@ def register():
 
 # Вход
 @app.route('/api/login', methods=['POST'])
+@swag_from({
+    'tags': ['Auth'],
+    'parameters': [
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'required': ['username', 'password'],
+                'properties': {
+                    'username': {'type': 'string'},
+                    'password': {'type': 'string'}
+                }
+            }
+        }
+    ],
+    'responses': {
+        200: {'description': 'Успешный вход'},
+        401: {'description': 'Неверные учетные данные'}
+    }
+})
 def login():
     try:
         data = request.json
@@ -222,40 +256,17 @@ def login():
         return jsonify({'error': f'Ошибка сервера: {str(e)}'}), 500
 
 # Получить всех пользователей
-@swag_from({
-    'tags': ['Users'],
-    'responses': {
-        200: {
-            'description': 'Успешное получение списка пользователей',
-            'schema': {
-                'type': 'object',
-                'properties': {
-                    'success': {'type': 'boolean'},
-                    'count': {'type': 'integer'},
-                    'users': {
-                        'type': 'array',
-                        'items': {
-                            'type': 'object',
-                            'properties': {
-                                'id': {'type': 'integer'},
-                                'username': {'type': 'string'},
-                                'email': {'type': 'string'},
-                                'role': {'type': 'string'},
-                                'created_at': {'type': 'string'},
-                                'updated_at': {'type': 'string'},
-                            },
-                        },
-                    },
-                },
-            },
-        },
-        500: {
-            'description': 'Ошибка сервера',
-        },
-    },
-})
 @app.route('/api/users', methods=['GET'])
 def get_users():
+    """
+    Получить список всех пользователей
+    ---
+    tags:
+      - Users
+    responses:
+      200:
+        description: Список пользователей
+    """
     try:
         users = User.query.order_by(User.created_at.desc()).all()
         users_list = [user.to_dict() for user in users]
@@ -272,6 +283,22 @@ def get_users():
 # Получить одного пользователя
 @app.route('/api/users/<int:user_id>', methods=['GET'])
 def get_user(user_id):
+    """
+    Получить пользователя по ID
+    ---
+    tags:
+      - Users
+    parameters:
+      - name: user_id
+        in: path
+        type: integer
+        required: true
+    responses:
+      200:
+        description: Данные пользователя
+      404:
+        description: Пользователь не найден
+    """
     try:
         user = User.query.get(user_id)
         
@@ -439,6 +466,7 @@ if __name__ == '__main__':
     print("="*50)
     print("📊 База данных: SQLite (users.db)")
     print("🔗 URL: http://localhost:3001")
+    print("📖 Swagger Docs: http://localhost:3001/apidocs/")
     print("🔧 API доступно по: http://localhost:3001/api/")
     print("👥 Тестовые аккаунты:")
     print("   • admin / admin123 (администратор)")
