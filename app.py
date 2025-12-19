@@ -138,6 +138,29 @@ def health_check():
 
 # Регистрация
 @app.route('/api/register', methods=['POST'])
+@swag_from({
+    'tags': ['Auth'],
+    'parameters': [
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'required': ['username', 'email', 'password'],
+                'properties': {
+                    'username': {'type': 'string'},
+                    'email': {'type': 'string'},
+                    'password': {'type': 'string', 'minLength': 6}
+                }
+            }
+        }
+    ],
+    'responses': {
+        201: {'description': 'Пользователь создан'},
+        400: {'description': 'Ошибка валидации'}
+    }
+})
 def register():
     try:
         data = request.json
@@ -186,6 +209,28 @@ def register():
 
 # Вход
 @app.route('/api/login', methods=['POST'])
+@swag_from({
+    'tags': ['Auth'],
+    'parameters': [
+        {
+            'name': 'body',
+            'in': 'body',
+            'required': True,
+            'schema': {
+                'type': 'object',
+                'required': ['username', 'password'],
+                'properties': {
+                    'username': {'type': 'string'},
+                    'password': {'type': 'string'}
+                }
+            }
+        }
+    ],
+    'responses': {
+        200: {'description': 'Успешный вход'},
+        401: {'description': 'Неверные учетные данные'}
+    }
+})
 def login():
     try:
         data = request.json
@@ -272,6 +317,22 @@ def get_users():
 # Получить одного пользователя
 @app.route('/api/users/<int:user_id>', methods=['GET'])
 def get_user(user_id):
+    """
+    Получить пользователя по ID
+    ---
+    tags:
+      - Users
+    parameters:
+      - name: user_id
+        in: path
+        type: integer
+        required: true
+    responses:
+      200:
+        description: Данные пользователя
+      404:
+        description: Пользователь не найден
+    """
     try:
         user = User.query.get(user_id)
         
@@ -439,6 +500,7 @@ if __name__ == '__main__':
     print("="*50)
     print("📊 База данных: SQLite (users.db)")
     print("🔗 URL: http://localhost:3001")
+    print("📖 Swagger Docs: http://localhost:3001/apidocs/")
     print("🔧 API доступно по: http://localhost:3001/api/")
     print("👥 Тестовые аккаунты:")
     print("   • admin / admin123 (администратор)")
