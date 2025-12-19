@@ -4,35 +4,20 @@ from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime
 from sqlalchemy import text
-from flasgger import Swagger, swag_from
 import os
 
-# Инициализация Flask приложения
 app = Flask(__name__)
-CORS(app)  # ВАЖНО: убрал supports_credentials=True
+CORS(app)
 
-# Конфигурация базы данных
 basedir = os.path.abspath(os.path.dirname(__file__))
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'users.db')
+app.config['SQLALCHEMY_DATABASE_URI'] = f"sqlite:///{os.path.join(basedir, 'database.db')}"
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = 'dev-secret-key-change-in-production'
 
-# Конфигурация Swagger
-app.config['SWAGGER'] = {
-    'title': 'My Login App API',
-    'uiversion': 3,
-    'openapi': '3.0.2'
-}
-
-swagger = Swagger(app)  # Создаем экземпляр Swagger
-
-# Инициализация SQLAlchemy
 db = SQLAlchemy(app)
 
-# Модель пользователя
 class User(db.Model):
     __tablename__ = 'users'
-    
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False)
@@ -40,26 +25,21 @@ class User(db.Model):
     role = db.Column(db.String(20), default='user')
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
+
     def to_dict(self):
         return {
             'id': self.id,
             'username': self.username,
             'email': self.email,
             'role': self.role,
-            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M:%S') if self.created_at else None,
-            'updated_at': self.updated_at.strftime('%Y-%m-%d %H:%M:%S') if self.updated_at else None
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
 
-# Создание таблиц (инициализация БД)
-def create_tables():
-    try:
+def init_db():
+    with app.app_context():
         db.create_all()
-        print("✅ Таблицы базы данных созданы")
-        
-        # Создаем тестового админа, если его нет
-        admin_exists = User.query.filter_by(username='admin').first()
-        if not admin_exists:
+        if not User.query.filter_by(username='admin').first():
             admin = User(
                 username='admin',
                 email='admin@example.com',
@@ -68,27 +48,23 @@ def create_tables():
             )
             db.session.add(admin)
             
-            # Создаем тестового пользователя
-            test_user = User(
+            user = User(
                 username='user',
                 email='user@example.com',
                 password=generate_password_hash('password'),
                 role='user'
             )
-            db.session.add(test_user)
-            
+            db.session.add(user)
             db.session.commit()
-            print("✅ Тестовые пользователи созданы")
-            
-    except Exception as e:
-        print(f"❌ Ошибка при создании таблиц: {e}")
-        db.session.rollback()
 
-# Главная страница
+init_db()
+
+# ================ РОУТЫ API ================
+
 @app.route('/')
 def home():
     return jsonify({
-        "message": "Backend для приложения входа работает! 🚀",
+        "message": "Backend работает! 🚀",
         "status": "online",
         "database": "SQLite",
         "endpoints": [
@@ -96,22 +72,16 @@ def home():
             "/api/register",
             "/api/login",
             "/api/users",
-            "/api/users/<id>"
+            "/api/users/<id>",
+            "/api/users/<id>/update",
+            "/api/users/<id>/delete",
+            "/api/users/search",
+            "/api/stats"
         ]
     })
 
-# Проверка здоровья
 @app.route('/api/health', methods=['GET'])
 def health_check():
-    """
-    Проверка состояния сервера
-    ---
-    tags:
-      - Health
-    responses:
-      200:
-        description: Статус сервера
-    """
     try:
         db.session.execute(text('SELECT 1'))
         db_status = "connected"
@@ -125,41 +95,17 @@ def health_check():
         "timestamp": datetime.utcnow().isoformat()
     })
 
-# Регистрация
 @app.route('/api/register', methods=['POST'])
-@swag_from({
-    'tags': ['Auth'],
-    'parameters': [
-        {
-            'name': 'body',
-            'in': 'body',
-            'required': True,
-            'schema': {
-                'type': 'object',
-                'required': ['username', 'email', 'password'],
-                'properties': {
-                    'username': {'type': 'string'},
-                    'email': {'type': 'string'},
-                    'password': {'type': 'string', 'minLength': 6}
-                }
-            }
-        }
-    ],
-    'responses': {
-        201: {'description': 'Пользователь создан'},
-        400: {'description': 'Ошибка валидации'}
-    }
-})
 def register():
     try:
-        data = request.json
+        data = request.get_json()
         
         if not data:
             return jsonify({'error': 'Нет данных'}), 400
         
-        required_fields = ['username', 'email', 'password']
-        for field in required_fields:
-            if not data.get(field):
+        required = ['username', 'email', 'password']
+        for field in required:
+            if field not in data or not data[field]:
                 return jsonify({'error': f'Поле {field} обязательно'}), 400
         
         username = data['username'].strip()
@@ -196,33 +142,10 @@ def register():
         db.session.rollback()
         return jsonify({'error': f'Ошибка сервера: {str(e)}'}), 500
 
-# Вход
 @app.route('/api/login', methods=['POST'])
-@swag_from({
-    'tags': ['Auth'],
-    'parameters': [
-        {
-            'name': 'body',
-            'in': 'body',
-            'required': True,
-            'schema': {
-                'type': 'object',
-                'required': ['username', 'password'],
-                'properties': {
-                    'username': {'type': 'string'},
-                    'password': {'type': 'string'}
-                }
-            }
-        }
-    ],
-    'responses': {
-        200: {'description': 'Успешный вход'},
-        401: {'description': 'Неверные учетные данные'}
-    }
-})
 def login():
     try:
-        data = request.json
+        data = request.get_json()
         
         if not data:
             return jsonify({'error': 'Нет данных'}), 400
@@ -255,18 +178,8 @@ def login():
     except Exception as e:
         return jsonify({'error': f'Ошибка сервера: {str(e)}'}), 500
 
-# Получить всех пользователей
 @app.route('/api/users', methods=['GET'])
 def get_users():
-    """
-    Получить список всех пользователей
-    ---
-    tags:
-      - Users
-    responses:
-      200:
-        description: Список пользователей
-    """
     try:
         users = User.query.order_by(User.created_at.desc()).all()
         users_list = [user.to_dict() for user in users]
@@ -280,25 +193,8 @@ def get_users():
     except Exception as e:
         return jsonify({'error': f'Ошибка сервера: {str(e)}'}), 500
 
-# Получить одного пользователя
 @app.route('/api/users/<int:user_id>', methods=['GET'])
 def get_user(user_id):
-    """
-    Получить пользователя по ID
-    ---
-    tags:
-      - Users
-    parameters:
-      - name: user_id
-        in: path
-        type: integer
-        required: true
-    responses:
-      200:
-        description: Данные пользователя
-      404:
-        description: Пользователь не найден
-    """
     try:
         user = User.query.get(user_id)
         
@@ -313,11 +209,10 @@ def get_user(user_id):
     except Exception as e:
         return jsonify({'error': f'Ошибка сервера: {str(e)}'}), 500
 
-# Обновить пользователя
-@app.route('/api/users/<int:user_id>', methods=['PUT'])
+@app.route('/api/users/<int:user_id>/update', methods=['PUT'])
 def update_user(user_id):
     try:
-        data = request.json
+        data = request.get_json()
         
         if not data:
             return jsonify({'error': 'Нет данных для обновления'}), 400
@@ -372,8 +267,7 @@ def update_user(user_id):
         db.session.rollback()
         return jsonify({'error': f'Ошибка сервера: {str(e)}'}), 500
 
-# Удалить пользователя
-@app.route('/api/users/<int:user_id>', methods=['DELETE'])
+@app.route('/api/users/<int:user_id>/delete', methods=['DELETE'])
 def delete_user(user_id):
     try:
         user = User.query.get(user_id)
@@ -399,7 +293,6 @@ def delete_user(user_id):
         db.session.rollback()
         return jsonify({'error': f'Ошибка сервера: {str(e)}'}), 500
 
-# Поиск пользователей
 @app.route('/api/users/search', methods=['GET'])
 def search_users():
     try:
@@ -424,7 +317,6 @@ def search_users():
     except Exception as e:
         return jsonify({'error': f'Ошибка сервера: {str(e)}'}), 500
 
-# Статистика
 @app.route('/api/stats', methods=['GET'])
 def get_stats():
     try:
@@ -447,30 +339,14 @@ def get_stats():
     except Exception as e:
         return jsonify({'error': f'Ошибка сервера: {str(e)}'}), 500
 
-# Обработчики ошибок
-@app.errorhandler(404)
-def not_found(error):
-    return jsonify({'error': 'Ресурс не найден'}), 404
-
-@app.errorhandler(500)
-def internal_error(error):
-    return jsonify({'error': 'Внутренняя ошибка сервера'}), 500
+# ================ ЗАПУСК ================
 
 if __name__ == '__main__':
-    # Инициализируем базу данных и создаем тестовые записи
-    with app.app_context():
-        create_tables()
-    
-    print("\n" + "="*50)
-    print("🚀 Запуск backend сервера с SQLite базой данных")
     print("="*50)
-    print("📊 База данных: SQLite (users.db)")
-    print("🔗 URL: http://localhost:3001")
-    print("📖 Swagger Docs: http://localhost:3001/apidocs/")
-    print("🔧 API доступно по: http://localhost:3001/api/")
-    print("👥 Тестовые аккаунты:")
+    print("🚀 API запущено!")
+    print("📊 База данных: SQLite")
+    print("👥 Тестовые пользователи:")
     print("   • admin / admin123 (администратор)")
     print("   • user / password (обычный пользователь)")
-    print("="*50 + "\n")
-    
+    print("="*50)
     app.run(debug=True, port=3001, use_reloader=False)
